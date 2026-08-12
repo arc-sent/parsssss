@@ -11,6 +11,9 @@ media/
 # Список опубликованных постов (локальное состояние)
 posted.json
 
+# Docker
+docker-compose.override.yml
+
 # Python
 __pycache__/
 *.pyc

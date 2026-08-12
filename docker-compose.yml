@@ -1,0 +1,11 @@
+services:
+  forwarder:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./session.session:/app/session.session
+      - ./posted.json:/app/posted.json
+      - ./media:/app/media
+    stdin_open: true
+    tty: true
