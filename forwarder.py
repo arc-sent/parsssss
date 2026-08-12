@@ -7,9 +7,10 @@ from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-SESSION     = os.path.join(BASE_DIR, "session")
+DATA_DIR    = os.path.join(BASE_DIR, "data")
+SESSION     = os.path.join(DATA_DIR, "session")
 MEDIA_DIR   = os.path.join(BASE_DIR, "media")
-POSTED_FILE = os.path.join(BASE_DIR, "posted.json")
+POSTED_FILE = os.path.join(DATA_DIR, "posted.json")
 
 FOOTER_PATTERN = re.compile(
     r"\s*[🌟⭐]\s*Забустить канал.*",
@@ -252,6 +253,7 @@ async def monitor_new(reader, http, token, source, target, posted, fingerprints,
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 async def main():
+    os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(MEDIA_DIR, exist_ok=True)
 
     env    = load_env()
