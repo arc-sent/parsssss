@@ -11,7 +11,7 @@ DATA_DIR    = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.ab
 MEDIA_DIR   = os.environ.get("MEDIA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "media"))
 POSTED_FILE = os.path.join(DATA_DIR, "posted.json")
 
-FOOTER_PATTERN = re.compile(r"\s*[🌟⭐]\s*Забустить канал.*", re.DOTALL)
+FOOTER_PATTERN = re.compile(r"\s*[🌟⭐🤩]\s*(Реклама и интро вырезаны|Забустить канал).*", re.DOTALL)
 
 
 def load_posted() -> set:
