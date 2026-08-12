@@ -18,13 +18,15 @@ FOOTER_PATTERN = re.compile(
 
 
 def load_env():
-    env = {}
-    with open(os.path.join(BASE_DIR, ".env"), encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip()
+    env = dict(os.environ)
+    dotenv_path = os.path.join(BASE_DIR, ".env")
+    if os.path.exists(dotenv_path):
+        with open(dotenv_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    env.setdefault(k.strip(), v.strip())
     return env
 
 
