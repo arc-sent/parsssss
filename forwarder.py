@@ -4,31 +4,14 @@ import json
 import re
 import aiohttp
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 
-BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR    = os.path.join(BASE_DIR, "data")
-SESSION     = os.path.join(DATA_DIR, "session")
-MEDIA_DIR   = os.path.join(BASE_DIR, "media")
+DATA_DIR    = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
+MEDIA_DIR   = os.environ.get("MEDIA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "media"))
 POSTED_FILE = os.path.join(DATA_DIR, "posted.json")
 
-FOOTER_PATTERN = re.compile(
-    r"\s*[🌟⭐]\s*Забустить канал.*",
-    re.DOTALL,
-)
-
-
-def load_env():
-    env = dict(os.environ)
-    dotenv_path = os.path.join(BASE_DIR, ".env")
-    if os.path.exists(dotenv_path):
-        with open(dotenv_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, v = line.split("=", 1)
-                    env.setdefault(k.strip(), v.strip())
-    return env
+FOOTER_PATTERN = re.compile(r"\s*[🌟⭐]\s*Забустить канал.*", re.DOTALL)
 
 
 def load_posted() -> set:
@@ -83,6 +66,7 @@ async def notify_admin(token: str, admin_id: str, text: str):
     except Exception:
         pass
 
+
 async def bot_send_message(session: aiohttp.ClientSession, token: str, chat_id: str, text: str):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     await session.post(url, json={"chat_id": f"@{chat_id}", "text": text})
@@ -90,21 +74,16 @@ async def bot_send_message(session: aiohttp.ClientSession, token: str, chat_id: 
 
 async def bot_send_file(session: aiohttp.ClientSession, token: str, chat_id: str,
                         file_path: str, caption: str, mime: str):
-    target = f"@{chat_id}"
-
     if "audio" in mime or file_path.endswith(".mp3") or file_path.endswith(".ogg"):
-        method = "sendAudio"
-        field  = "audio"
+        method, field = "sendAudio", "audio"
     elif "video" in mime or file_path.endswith(".mp4"):
-        method = "sendVideo"
-        field  = "video"
+        method, field = "sendVideo", "video"
     else:
-        method = "sendDocument"
-        field  = "document"
+        method, field = "sendDocument", "document"
 
-    url = f"https://api.telegram.org/bot{token}/{method}"
+    url  = f"https://api.telegram.org/bot{token}/{method}"
     data = aiohttp.FormData()
-    data.add_field("chat_id", target)
+    data.add_field("chat_id", f"@{chat_id}")
     if caption:
         data.add_field("caption", caption)
     data.add_field(field, open(file_path, "rb"), filename=os.path.basename(file_path))
@@ -117,7 +96,7 @@ async def bot_send_file(session: aiohttp.ClientSession, token: str, chat_id: str
 
 async def bot_send_photo(session: aiohttp.ClientSession, token: str, chat_id: str,
                          file_path: str, caption: str):
-    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    url  = f"https://api.telegram.org/bot{token}/sendPhoto"
     data = aiohttp.FormData()
     data.add_field("chat_id", f"@{chat_id}")
     if caption:
@@ -132,13 +111,9 @@ async def bot_send_photo(session: aiohttp.ClientSession, token: str, chat_id: st
 
 # ── Core forward logic ─────────────────────────────────────────────────────────
 
-async def forward_message(reader: TelegramClient,
-                          http: aiohttp.ClientSession,
-                          token: str,
-                          msg,
-                          target: str,
-                          delay: float,
-                          admin_id: str = "") -> bool:
+async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
+                          token: str, msg, target: str,
+                          delay: float, admin_id: str = "") -> bool:
     caption = clean_caption(msg.text or "")
     try:
         if msg.media is None:
@@ -162,7 +137,7 @@ async def forward_message(reader: TelegramClient,
             if ext == ".bin":
                 if "audio" in mime: ext = ".mp3"
                 elif "video" in mime: ext = ".mp4"
-                elif "ogg" in mime:  ext = ".ogg"
+                elif "ogg"   in mime: ext = ".ogg"
 
             tmp = os.path.join(MEDIA_DIR, f"{msg.id}_tmp{ext}")
             await reader.download_media(msg, tmp)
@@ -192,7 +167,7 @@ async def migrate_history(reader, http, token, source, target, posted, fingerpri
             print(f"[{msg.id}] Уже опубликован (ID), пропускаю")
             continue
 
-        caption  = clean_caption(msg.text or "")
+        caption   = clean_caption(msg.text or "")
         has_media = msg.media is not None
         if not caption and not has_media:
             continue
@@ -219,7 +194,7 @@ async def migrate_history(reader, http, token, source, target, posted, fingerpri
 
 async def monitor_new(reader, http, token, source, target, posted, fingerprints, delay, admin_id=""):
     print(f"\n=== Мониторинг новых сообщений из @{source} ===")
-    print("Ctrl+C для остановки\n")
+    print("Ожидаю новые посты...\n")
 
     @reader.on(events.NewMessage(chats=source))
     async def handler(event):
@@ -227,7 +202,7 @@ async def monitor_new(reader, http, token, source, target, posted, fingerprints,
         if msg.id in posted:
             return
 
-        caption  = clean_caption(msg.text or "")
+        caption   = clean_caption(msg.text or "")
         has_media = msg.media is not None
         if not caption and not has_media:
             return
@@ -256,44 +231,46 @@ async def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(MEDIA_DIR, exist_ok=True)
 
-    env    = load_env()
-    source = env.get("SOURCE_CHANNEL", "worldbegemotkot")
-    target = env.get("TARGET_CHANNEL", "")
-    token  = env.get("BOT_TOKEN", "")
-    delay    = float(env.get("POST_DELAY", "5"))
-    admin_id = env.get("ADMIN_ID", "")
+    api_id      = os.environ.get("API_ID", "")
+    api_hash    = os.environ.get("API_HASH", "")
+    session_str = os.environ.get("SESSION_STRING", "")
+    source      = os.environ.get("SOURCE_CHANNEL", "")
+    target      = os.environ.get("TARGET_CHANNEL", "")
+    token       = os.environ.get("BOT_TOKEN", "")
+    delay       = float(os.environ.get("POST_DELAY", "5"))
+    admin_id    = os.environ.get("ADMIN_ID", "")
+    mode        = os.environ.get("MODE", "3")
 
-    if not target or target == "your_channel_username":
-        print("Укажите TARGET_CHANNEL в файле .env!")
+    if not api_id or not api_hash:
+        print("Укажите API_ID и API_HASH в .env!")
         return
-    if not token or token == "your_bot_token":
-        print("Укажите BOT_TOKEN в файле .env!")
+    if not session_str:
+        print("Укажите SESSION_STRING в .env! Запустите setup.py для получения строки сессии.")
+        return
+    if not target:
+        print("Укажите TARGET_CHANNEL в .env!")
+        return
+    if not token:
+        print("Укажите BOT_TOKEN в .env!")
         return
 
-    reader = TelegramClient(SESSION, int(env["API_ID"]), env["API_HASH"])
-    await reader.start(password=lambda: input("Введите пароль 2FA: "))
-    print(f"Аккаунт подключён. Бот: @{token.split(':')[0]}...\n")
+    reader = TelegramClient(StringSession(session_str), int(api_id), api_hash)
+    await reader.start()
+    print(f"Аккаунт подключён. Режим: {mode}\n")
 
-    posted = load_posted()
-
-    print("Выберите режим:")
-    print("  1 — Перенести архив (все старые посты)")
-    print("  2 — Мониторинг новых постов в реальном времени")
-    print("  3 — Оба (сначала архив, затем мониторинг)")
-    choice = input("\nВаш выбор [1/2/3]: ").strip()
-
+    posted       = load_posted()
     fingerprints = await load_target_fingerprints(reader, target)
 
     async with aiohttp.ClientSession() as http:
-        if choice == "1":
+        if mode == "1":
             await migrate_history(reader, http, token, source, target, posted, fingerprints, delay, admin_id)
-        elif choice == "2":
+        elif mode == "2":
             await monitor_new(reader, http, token, source, target, posted, fingerprints, delay, admin_id)
-        elif choice == "3":
+        elif mode == "3":
             await migrate_history(reader, http, token, source, target, posted, fingerprints, delay, admin_id)
             await monitor_new(reader, http, token, source, target, posted, fingerprints, delay, admin_id)
         else:
-            print("Неверный выбор.")
+            print(f"Неверный MODE={mode!r}. Допустимые значения: 1, 2, 3.")
 
     await reader.disconnect()
 

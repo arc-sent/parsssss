@@ -4,6 +4,7 @@
 # Сессия Telethon
 *.session
 *.session-journal
+setup.py
 
 # Временные медиафайлы
 media/
