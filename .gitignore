@@ -1,0 +1,19 @@
+# Секреты
+.env
+
+# Сессия Telethon
+*.session
+*.session-journal
+
+# Временные медиафайлы
+media/
+
+# Список опубликованных постов (локальное состояние)
+posted.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
