@@ -121,28 +121,33 @@ async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
                 await bot_send_message(http, token, target, caption)
 
         elif isinstance(msg.media, MessageMediaPhoto):
-            tmp = os.path.join(MEDIA_DIR, f"{msg.id}_tmp.jpg")
-            await reader.download_media(msg, tmp)
-            await bot_send_photo(http, token, target, tmp, caption)
-            os.remove(tmp)
+            tmp = os.path.join(MEDIA_DIR, f"{msg.id}.jpg")
+            try:
+                await reader.download_media(msg, tmp)
+                await bot_send_photo(http, token, target, tmp, caption)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
 
         elif isinstance(msg.media, MessageMediaDocument):
-            doc  = msg.media.document
-            mime = doc.mime_type or ""
-            ext  = ".bin"
+            doc      = msg.media.document
+            mime     = doc.mime_type or ""
+            filename = None
             for attr in doc.attributes:
                 if type(attr).__name__ == "DocumentAttributeFilename":
-                    ext = os.path.splitext(attr.file_name)[1] or ext
+                    filename = attr.file_name
                     break
-            if ext == ".bin":
-                if "audio" in mime: ext = ".mp3"
-                elif "video" in mime: ext = ".mp4"
-                elif "ogg"   in mime: ext = ".ogg"
+            if not filename:
+                ext = ".mp3" if "audio" in mime else ".mp4" if "video" in mime else ".ogg" if "ogg" in mime else ".bin"
+                filename = f"{msg.id}{ext}"
 
-            tmp = os.path.join(MEDIA_DIR, f"{msg.id}_tmp{ext}")
-            await reader.download_media(msg, tmp)
-            await bot_send_file(http, token, target, tmp, caption, mime)
-            os.remove(tmp)
+            tmp = os.path.join(MEDIA_DIR, filename)
+            try:
+                await reader.download_media(msg, tmp)
+                await bot_send_file(http, token, target, tmp, caption, mime)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
 
         else:
             if caption:
