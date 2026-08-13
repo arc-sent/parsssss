@@ -254,7 +254,13 @@ async def main():
         print("Укажите BOT_TOKEN в .env!")
         return
 
-    reader = TelegramClient(StringSession(session_str), int(api_id), api_hash)
+    reader = TelegramClient(
+        StringSession(session_str), int(api_id), api_hash,
+        timeout=60,
+        request_retries=10,
+        connection_retries=10,
+        retry_delay=5,
+    )
     await reader.start()
     print(f"Аккаунт подключён. Режим: {mode}\n")
 
