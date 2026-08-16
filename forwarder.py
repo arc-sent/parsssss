@@ -1,7 +1,9 @@
 import asyncio
-import os
+import html as _html
 import json
+import os
 import re
+
 import aiohttp
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -11,7 +13,32 @@ DATA_DIR    = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.ab
 MEDIA_DIR   = os.environ.get("MEDIA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "media"))
 POSTED_FILE = os.path.join(DATA_DIR, "posted.json")
 
-FOOTER_PATTERN = re.compile(r"\s*.{0,5}\s*(Реклама и интро вырезаны|Забустить канал).*", re.DOTALL)
+CHANNEL_URL  = os.environ.get("CHANNEL_URL", "https://t.me/wbc_stories")
+CHANNEL_NAME = os.environ.get("CHANNEL_NAME", "Канал")
+
+# Footer triggers: cut from the line that contains any of these phrases
+_FOOTER_TRIGGERS = ("Реклама и интро вырезаны", "Забустить канал")
+
+# Emoji unicode ranges
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001F64F"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F700-\U0001F7FF"
+    "\U0001F800-\U0001F8FF"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U00002700-\U000027BF"
+    "\U0001F1E0-\U0001F1FF"
+    "\U00002500-\U00002BFF"
+    "]+",
+    re.UNICODE,
+)
+
+# Markdown-style links [text](url) and bare URLs
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
+_URL_RE     = re.compile(r"https?://\S+")
 
 
 def load_posted() -> set:
@@ -27,9 +54,52 @@ def save_posted(posted: set):
 
 
 def clean_caption(text: str) -> str:
+    """Remove footer lines. Splits by line so the trigger never eats the previous line."""
     if not text:
         return ""
-    return FOOTER_PATTERN.sub("", text).strip()
+    lines = text.split("\n")
+    result = []
+    for line in lines:
+        if any(trigger in line for trigger in _FOOTER_TRIGGERS):
+            break
+        result.append(line)
+    return "\n".join(result).strip()
+
+
+def transform_caption(text: str) -> str:
+    """
+    Apply full style transformation:
+    - Remove markdown links [text](url) → keep text, drop URL
+    - Remove bare external URLs
+    - Replace all emoji with 💀
+    - HTML-escape for Bot API parse_mode=HTML
+    - Append channel link at the bottom
+    """
+    if not text:
+        return f'<a href="{CHANNEL_URL}">{CHANNEL_NAME}</a>'
+
+    # [text](url) → keep text only
+    text = _MD_LINK_RE.sub(lambda m: m.group(1), text)
+
+    # Remove bare URLs
+    text = _URL_RE.sub("", text)
+
+    # Replace emoji sequences with 💀
+    text = _EMOJI_RE.sub("💀", text)
+
+    # Clean up extra spaces / blank lines left after URL removal
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" \n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = text.strip()
+
+    # HTML-escape regular text so < > & don't break HTML mode
+    text = _html.escape(text)
+
+    # Append channel link (raw HTML, added after escaping)
+    text += f'\n\n<a href="{CHANNEL_URL}">{CHANNEL_NAME}</a>'
+
+    return text
 
 
 def make_fingerprint(text: str) -> str | None:
@@ -68,8 +138,10 @@ async def notify_admin(token: str, admin_id: str, text: str):
 
 
 async def bot_send_message(session: aiohttp.ClientSession, token: str, chat_id: str, text: str):
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    await session.post(url, json={"chat_id": f"@{chat_id}", "text": text})
+    await session.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={"chat_id": f"@{chat_id}", "text": text, "parse_mode": "HTML"},
+    )
 
 
 async def bot_send_file(session: aiohttp.ClientSession, token: str, chat_id: str,
@@ -86,6 +158,7 @@ async def bot_send_file(session: aiohttp.ClientSession, token: str, chat_id: str
     data.add_field("chat_id", f"@{chat_id}")
     if caption:
         data.add_field("caption", caption)
+        data.add_field("parse_mode", "HTML")
     data.add_field(field, open(file_path, "rb"), filename=os.path.basename(file_path))
 
     async with session.post(url, data=data) as resp:
@@ -101,12 +174,35 @@ async def bot_send_photo(session: aiohttp.ClientSession, token: str, chat_id: st
     data.add_field("chat_id", f"@{chat_id}")
     if caption:
         data.add_field("caption", caption)
-    data.add_field("photo", open(file_path, "rb"), filename=os.path.basename(file_path))
+        data.add_field("parse_mode", "HTML")
+    data.add_field("photo", open(file_path, "rb"),
+                   filename=os.path.basename(file_path), content_type="image/jpeg")
 
     async with session.post(url, data=data) as resp:
         result = await resp.json()
         if not result.get("ok"):
-            raise RuntimeError(result.get("description", "Bot API error"))
+            desc = result.get("description", "Bot API error")
+            if "photo" in desc.lower() or "too large" in desc.lower() or "wrong" in desc.lower():
+                await bot_send_photo_as_document(session, token, chat_id, file_path, caption)
+            else:
+                raise RuntimeError(desc)
+
+
+async def bot_send_photo_as_document(session: aiohttp.ClientSession, token: str, chat_id: str,
+                                     file_path: str, caption: str):
+    url  = f"https://api.telegram.org/bot{token}/sendDocument"
+    data = aiohttp.FormData()
+    data.add_field("chat_id", f"@{chat_id}")
+    if caption:
+        data.add_field("caption", caption)
+        data.add_field("parse_mode", "HTML")
+    data.add_field("document", open(file_path, "rb"),
+                   filename=os.path.basename(file_path), content_type="image/jpeg")
+
+    async with session.post(url, data=data) as resp:
+        result = await resp.json()
+        if not result.get("ok"):
+            raise RuntimeError(result.get("description", "Bot API error (document fallback)"))
 
 
 # ── Core forward logic ─────────────────────────────────────────────────────────
@@ -114,7 +210,7 @@ async def bot_send_photo(session: aiohttp.ClientSession, token: str, chat_id: st
 async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
                           token: str, msg, target: str,
                           delay: float, admin_id: str = "") -> bool:
-    caption = clean_caption(msg.text or "")
+    caption = transform_caption(clean_caption(msg.text or ""))
     try:
         if msg.media is None:
             if caption:
@@ -125,6 +221,13 @@ async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
             try:
                 await reader.download_media(msg, tmp)
                 await bot_send_photo(http, token, target, tmp, caption)
+            except (OSError, RuntimeError) as e:
+                err = str(e)
+                if "No space left" in err or "Too Large" in err or "too large" in err or "wrong" in err.lower():
+                    print(f"  [FALLBACK] {msg.id}: {e} → Telethon")
+                    await reader.send_file(target, msg.media, caption=caption, parse_mode="html")
+                else:
+                    raise
             finally:
                 if os.path.exists(tmp):
                     os.remove(tmp)
@@ -145,6 +248,13 @@ async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
             try:
                 await reader.download_media(msg, tmp)
                 await bot_send_file(http, token, target, tmp, caption, mime)
+            except (OSError, RuntimeError) as e:
+                err = str(e)
+                if "No space left" in err or "Too Large" in err or "too large" in err:
+                    print(f"  [FALLBACK] {msg.id}: {e} → Telethon")
+                    await reader.send_file(target, msg.media, caption=caption, parse_mode="html")
+                else:
+                    raise
             finally:
                 if os.path.exists(tmp):
                     os.remove(tmp)
@@ -250,7 +360,7 @@ async def main():
         print("Укажите API_ID и API_HASH в .env!")
         return
     if not session_str:
-        print("Укажите SESSION_STRING в .env! Запустите setup.py для получения строки сессии.")
+        print("Укажите SESSION_STRING в .env!")
         return
     if not target:
         print("Укажите TARGET_CHANNEL в .env!")
@@ -261,10 +371,7 @@ async def main():
 
     reader = TelegramClient(
         StringSession(session_str), int(api_id), api_hash,
-        timeout=60,
-        request_retries=10,
-        connection_retries=10,
-        retry_delay=5,
+        timeout=60, request_retries=10, connection_retries=10, retry_delay=5,
     )
     await reader.start()
     print(f"Аккаунт подключён. Режим: {mode}\n")

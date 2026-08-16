@@ -7,8 +7,8 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
 
-COPY forwarder.py .
+COPY forwarder.py bot.py ./
 
 RUN mkdir -p media
 
-CMD ["python", "forwarder.py"]
+CMD ["python", "bot.py"]
