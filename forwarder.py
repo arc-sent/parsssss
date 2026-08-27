@@ -207,9 +207,25 @@ async def bot_send_photo_as_document(session: aiohttp.ClientSession, token: str,
 
 # ── Core forward logic ─────────────────────────────────────────────────────────
 
+async def _telethon_send(reader: TelegramClient, source: str, msg, target: str, caption: str):
+    """Send via Telethon, refreshing the file reference if it has expired."""
+    try:
+        await reader.send_file(target, msg.media, caption=caption, parse_mode="html")
+    except Exception as e:
+        if "file reference" in str(e).lower() and source:
+            print(f"  [REFRESH] {msg.id}: file reference expired, re-fetching...")
+            fresh = await reader.get_messages(source, ids=msg.id)
+            if fresh and fresh.media:
+                await reader.send_file(target, fresh.media, caption=caption, parse_mode="html")
+            else:
+                raise
+        else:
+            raise
+
+
 async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
                           token: str, msg, target: str,
-                          delay: float, admin_id: str = "") -> bool:
+                          delay: float, admin_id: str = "", source: str = "") -> bool:
     caption = transform_caption(clean_caption(msg.text or ""))
     try:
         if msg.media is None:
@@ -225,7 +241,7 @@ async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
                 err = str(e)
                 if "No space left" in err or "Too Large" in err or "too large" in err or "wrong" in err.lower():
                     print(f"  [FALLBACK] {msg.id}: {e} → Telethon")
-                    await reader.send_file(target, msg.media, caption=caption, parse_mode="html")
+                    await _telethon_send(reader, source, msg, target, caption)
                 else:
                     raise
             finally:
@@ -252,7 +268,7 @@ async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
                 err = str(e)
                 if "No space left" in err or "Too Large" in err or "too large" in err:
                     print(f"  [FALLBACK] {msg.id}: {e} → Telethon")
-                    await reader.send_file(target, msg.media, caption=caption, parse_mode="html")
+                    await _telethon_send(reader, source, msg, target, caption)
                 else:
                     raise
             finally:
@@ -294,7 +310,7 @@ async def migrate_history(reader, http, token, source, target, posted, fingerpri
             continue
 
         print(f"[{msg.id}] Публикую: {caption[:60] if caption else '<медиа>'}...")
-        ok = await forward_message(reader, http, token, msg, target, delay, admin_id)
+        ok = await forward_message(reader, http, token, msg, target, delay, admin_id, source)
         if ok:
             posted.add(msg.id)
             if fp:
@@ -329,7 +345,7 @@ async def monitor_new(reader, http, token, source, target, posted, fingerprints,
             return
 
         print(f"[НОВОЕ {msg.id}] {caption[:60] if caption else '<медиа>'}...")
-        ok = await forward_message(reader, http, token, msg, target, delay, admin_id)
+        ok = await forward_message(reader, http, token, msg, target, delay, admin_id, source)
         if ok:
             posted.add(msg.id)
             if fp:

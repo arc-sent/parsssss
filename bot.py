@@ -133,7 +133,7 @@ class Controller:
                 self.posted.add(msg.id)
                 continue
             ok = await forward_message(
-                self.reader, http, self.token, msg, self.target, self.delay
+                self.reader, http, self.token, msg, self.target, self.delay, source=self.source
             )
             if ok:
                 self.posted.add(msg.id)
@@ -165,7 +165,7 @@ class Controller:
                 self.posted.add(msg.id)
                 return
             ok = await forward_message(
-                self.reader, http, self.token, msg, self.target, self.delay
+                self.reader, http, self.token, msg, self.target, self.delay, source=self.source
             )
             if ok:
                 self.posted.add(msg.id)
@@ -253,7 +253,7 @@ class Controller:
             msg = self.pending.pop(key, None)
             if msg:
                 ok = await forward_message(
-                    self.reader, http, self.token, msg, self.target, self.delay
+                    self.reader, http, self.token, msg, self.target, self.delay, source=self.source
                 )
                 if ok:
                     self.stats["posted"] += 1
