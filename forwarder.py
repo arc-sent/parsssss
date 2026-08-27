@@ -223,6 +223,19 @@ async def _telethon_send(reader: TelegramClient, source: str, msg, target: str, 
             raise
 
 
+async def _download_with_retry(reader: TelegramClient, msg, path: str, retries: int = 3, base_delay: float = 15.0):
+    for attempt in range(1, retries + 1):
+        try:
+            await reader.download_media(msg, path)
+            return
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            if attempt == retries:
+                raise
+            wait = base_delay * attempt
+            print(f"  [TIMEOUT] {msg.id}: попытка {attempt}/{retries}, повтор через {wait:.0f}с — {e}")
+            await asyncio.sleep(wait)
+
+
 async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
                           token: str, msg, target: str,
                           delay: float, admin_id: str = "", source: str = "") -> bool:
@@ -235,8 +248,11 @@ async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
         elif isinstance(msg.media, MessageMediaPhoto):
             tmp = os.path.join(MEDIA_DIR, f"{msg.id}.jpg")
             try:
-                await reader.download_media(msg, tmp)
+                await _download_with_retry(reader, msg, tmp)
                 await bot_send_photo(http, token, target, tmp, caption)
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                print(f"  [SKIP] {msg.id}: таймаут Telegram после нескольких попыток — {e}")
+                return False
             except (OSError, RuntimeError) as e:
                 err = str(e)
                 if "No space left" in err or "Too Large" in err or "too large" in err or "wrong" in err.lower():
@@ -262,8 +278,11 @@ async def forward_message(reader: TelegramClient, http: aiohttp.ClientSession,
 
             tmp = os.path.join(MEDIA_DIR, filename)
             try:
-                await reader.download_media(msg, tmp)
+                await _download_with_retry(reader, msg, tmp)
                 await bot_send_file(http, token, target, tmp, caption, mime)
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                print(f"  [SKIP] {msg.id}: таймаут Telegram после нескольких попыток — {e}")
+                return False
             except (OSError, RuntimeError) as e:
                 err = str(e)
                 if "No space left" in err or "Too Large" in err or "too large" in err:
